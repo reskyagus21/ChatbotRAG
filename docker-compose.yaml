@@ -1,0 +1,60 @@
+version: '3.9'
+
+services:
+  web:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - media:/app/media
+      - faiss_index:/app/faiss_index
+      - static:/app/static
+      - staticfiles:/app/staticfiles
+    environment:  
+      - DJANGO_SETTINGS_MODULE=Rag.settings
+      - MYSQL_HOST=db
+      - MYSQL_DATABASE=rag
+      - MYSQL_USER=root
+      - MYSQL_PASSWORD=12345
+      - MYSQL_PORT=3306
+    depends_on:
+      db:
+        condition: service_healthy
+      download_models:
+        condition: service_completed_successfully
+    command: >
+      sh -c "wait-for-db.sh db 3306 &&
+         python manage.py migrate &&
+         python manage.py collectstatic --noinput &&
+         gunicorn --bind 0.0.0.0:8000 --workers 3 Rag.wsgi:application"
+
+  db:
+    image: mysql:8.0
+    environment:
+      - MYSQL_ROOT_PASSWORD=12345
+      - MYSQL_DATABASE=rag
+    volumes:
+      - mysql_data:/var/lib/mysql
+    ports:
+      - "3307:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+
+  download_models:
+    image: python:3.10-slim
+    volumes:
+      - ./models:/app/models
+    command: >
+      bash -c "pip install huggingface_hub &&
+               huggingface-cli download BAAI/bge-m3 --local-dir /app/models/bge-m3 &&
+               huggingface-cli download cross-encoder/ms-marco-MiniLM-L-6-v2 --local-dir /app/models/ms-marco-MiniLM-L6-v2"
+
+volumes:
+  media:
+  faiss_index:
+  static:
+  staticfiles:
+  mysql_data:
